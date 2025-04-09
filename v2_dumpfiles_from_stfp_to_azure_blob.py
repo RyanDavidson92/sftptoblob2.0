@@ -4,7 +4,7 @@ from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 from io import BytesIO
 
-# Load environment variables from .env file testtesttesttesttesttesttesttest
+# Load environment variables from .env file 
 load_dotenv()
 
 # SFTP credentials
