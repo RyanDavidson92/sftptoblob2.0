@@ -1,3 +1,7 @@
+### This script parallelly dumps two files from SFTP VPS into azure blob. One not transformed goes to "clientinoicesraw", the other transforms and goes to "clientinvoices-transformed-with-controlno-and-clientid-added"
+## This allows for solving for data lineage issues by keep an un-transformed file. 
+
+
 import os
 import paramiko
 import pandas as pd
