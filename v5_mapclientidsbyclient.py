@@ -22,8 +22,8 @@ load_dotenv()
 # Azure Blob Storage config
 AZURE_STORAGE_ACCOUNT = os.getenv("AZURE_STORAGE_ACCOUNT")
 AZURE_STORAGE_KEY = os.getenv("AZURE_STORAGE_KEY")
-RAW_CONTAINER = "clientinvoicesraw"
-TRANSFORMED_CONTAINER = "clientinvoices-transformed-with-controlno-and-clientid-added"
+RAW_CONTAINER = os.getenv("AZURE_RAW_CONTAINER")
+TRANSFORMED_CONTAINER = os.getenv("AZURE_TRANSFORMED_CONTAINER")
 
 # Client config
 CLIENTS = {
@@ -36,15 +36,15 @@ blob_service_client = BlobServiceClient(account_url=f"https://{AZURE_STORAGE_ACC
 raw_container_client = blob_service_client.get_container_client(RAW_CONTAINER)
 transformed_container_client = blob_service_client.get_container_client(TRANSFORMED_CONTAINER)
 
-CONTROLNO_START = 1000
+BATCHNUMBER_START = 1000
 
-# Wrapper 1: Add metadata columns to the DataFrame
-def add_controlno_and_clientid(df, controlno, clientid):
-    df['controlno'] = controlno
-    df['clientid'] = clientid
+# Wrapper 1: Adds batchnumber and clientid as the first two columns in the DataFrame
+def add_batchnumber_and_clientid(df, batchnumber, clientid):
+    df.insert(0, 'batchnumber', batchnumber)
+    df.insert(1, 'clientid', clientid)
     return df
 
-# Wrapper 2: Upload raw or transformed file to Blob Storage, checking for duplicates
+# Wrapper 2: Uploads raw or transformed file data to the correct Azure Blob container
 def upload_to_blob(file_data, blob_name, is_transformed=False):
     blob_client = (transformed_container_client if is_transformed else raw_container_client).get_blob_client(blob_name)
     if not blob_client.exists():
@@ -53,15 +53,15 @@ def upload_to_blob(file_data, blob_name, is_transformed=False):
     else:
         print(f"⚠️ Skipped duplicate blob: {blob_name}")
 
-# Wrapper 3: Full processing of one file (download, transform, upload raw + transformed)
-def process_file(sftp, client_name, file_name, controlno):
+# Wrapper 3: Downloads a file from SFTP, transforms it, and uploads both versions to Blob Storage
+def process_file(sftp, client_name, file_name, batchnumber):
     remote_path = f"/upload/{file_name}"
     file_data = BytesIO()
     sftp.getfo(remote_path, file_data)
     file_data.seek(0)
 
     df = pd.read_csv(file_data)
-    df = add_controlno_and_clientid(df, controlno, CLIENTS[client_name]['id'])
+    df = add_batchnumber_and_clientid(df, batchnumber, CLIENTS[client_name]['id'])
 
     output_buffer = BytesIO()
     df.to_csv(output_buffer, index=False)
@@ -74,10 +74,10 @@ def process_file(sftp, client_name, file_name, controlno):
     raw_name = f"{client_name.lower()}_{file_name}"
     upload_to_blob(file_data, raw_name, is_transformed=False)
 
-    return controlno + 1
+    return batchnumber + 1
 
-# Wrapper 4: Connect to a client folder and process all new (non-transformed) files
-def handle_client(client_name, controlno):
+# Wrapper 4: Connects to each client's SFTP, processes new files, and skips previously processed ones
+def handle_client(client_name, batchnumber):
     print(f"\n🔄 Connecting to {client_name}...")
     transport = paramiko.Transport((os.getenv("SFTP_HOST"), int(os.getenv("SFTP_PORT"))))
     transport.connect(username=CLIENTS[client_name]['user'], password=CLIENTS[client_name]['pass'])
@@ -90,20 +90,20 @@ def handle_client(client_name, controlno):
                 continue
             blob_name = f"{client_name.lower()}_{file_name}"
             if not raw_container_client.get_blob_client(blob_name).exists():
-                controlno = process_file(sftp, client_name, file_name, controlno)
+                batchnumber = process_file(sftp, client_name, file_name, batchnumber)
             else:
                 print(f"🔁 Already processed: {blob_name}")
     finally:
         sftp.close()
         transport.close()
 
-    return controlno
+    return batchnumber
 
-# Wrapper 5: Loop through all defined clients and initiate processing
+# Wrapper 5: Main entry point that iterates through all clients and processes their files
 def main():
-    controlno = CONTROLNO_START
+    batchnumber = BATCHNUMBER_START
     for client_name in CLIENTS:
-        controlno = handle_client(client_name, controlno)
+        batchnumber = handle_client(client_name, batchnumber)
     print("\n✅ All client files processed.")
 
 if __name__ == "__main__":
