@@ -36,11 +36,11 @@ blob_service_client = BlobServiceClient(account_url=f"https://{AZURE_STORAGE_ACC
 raw_container_client = blob_service_client.get_container_client(RAW_CONTAINER)
 transformed_container_client = blob_service_client.get_container_client(TRANSFORMED_CONTAINER)
 
-BATCHNUMBER_START = 1000
+CONTROLNO_START = 1000
 
-# Wrapper 1: Adds batchnumber and clientid as the first two columns in the DataFrame
-def add_batchnumber_and_clientid(df, batchnumber, clientid):
-    df.insert(0, 'batchnumber', batchnumber)
+# Wrapper 1: Adds controlno and clientid as the first two columns in the DataFrame
+def add_controlno_and_clientid(df, controlno, clientid):
+    df.insert(0, 'controlno', controlno)
     df.insert(1, 'clientid', clientid)
     return df
 
@@ -54,14 +54,14 @@ def upload_to_blob(file_data, blob_name, is_transformed=False):
         print(f"⚠️ Skipped duplicate blob: {blob_name}")
 
 # Wrapper 3: Downloads a file from SFTP, transforms it, and uploads both versions to Blob Storage
-def process_file(sftp, client_name, file_name, batchnumber):
+def process_file(sftp, client_name, file_name, controlno):
     remote_path = f"/upload/{file_name}"
     file_data = BytesIO()
     sftp.getfo(remote_path, file_data)
     file_data.seek(0)
 
     df = pd.read_csv(file_data)
-    df = add_batchnumber_and_clientid(df, batchnumber, CLIENTS[client_name]['id'])
+    df = add_controlno_and_clientid(df, controlno, CLIENTS[client_name]['id'])
 
     output_buffer = BytesIO()
     df.to_csv(output_buffer, index=False)
@@ -74,10 +74,10 @@ def process_file(sftp, client_name, file_name, batchnumber):
     raw_name = f"{client_name.lower()}_{file_name}"
     upload_to_blob(file_data, raw_name, is_transformed=False)
 
-    return batchnumber + 1
+    return controlno + 1
 
 # Wrapper 4: Connects to each client's SFTP, processes new files, and skips previously processed ones
-def handle_client(client_name, batchnumber):
+def handle_client(client_name, controlno):
     print(f"\n🔄 Connecting to {client_name}...")
     transport = paramiko.Transport((os.getenv("SFTP_HOST"), int(os.getenv("SFTP_PORT"))))
     transport.connect(username=CLIENTS[client_name]['user'], password=CLIENTS[client_name]['pass'])
@@ -90,20 +90,20 @@ def handle_client(client_name, batchnumber):
                 continue
             blob_name = f"{client_name.lower()}_{file_name}"
             if not raw_container_client.get_blob_client(blob_name).exists():
-                batchnumber = process_file(sftp, client_name, file_name, batchnumber)
+                controlno = process_file(sftp, client_name, file_name, controlno)
             else:
                 print(f"🔁 Already processed: {blob_name}")
     finally:
         sftp.close()
         transport.close()
 
-    return batchnumber
+    return controlno
 
 # Wrapper 5: Main entry point that iterates through all clients and processes their files
 def main():
-    batchnumber = BATCHNUMBER_START
+    controlno = CONTROLNO_START
     for client_name in CLIENTS:
-        batchnumber = handle_client(client_name, batchnumber)
+        controlno = handle_client(client_name, controlno)
     print("\n✅ All client files processed.")
 
 if __name__ == "__main__":
