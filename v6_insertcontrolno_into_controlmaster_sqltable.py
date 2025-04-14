@@ -101,8 +101,8 @@ def process_file(sftp, client_name, file_name, controlno):
     file_data.seek(0)
 
 #### changed this line from df = pd.read_csv(file_data) to below to handle both excel .csv formats and numbers app formats in mac. 
-    ##df = pd.read_csv(file_data, encoding='ISO-8859-1')
-    df = pd.read_csv(file_data)
+    df = pd.read_csv(file_data, encoding='ISO-8859-1')
+    ##df = pd.read_csv(file_data)  ### This is the old one that didnt read utf-8 data. 
     df = add_controlno_and_clientid(df, controlno, CLIENTS[client_name]['id'])
 
     # Insert control record to control_master table
