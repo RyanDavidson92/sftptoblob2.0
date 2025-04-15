@@ -34,6 +34,26 @@ transformed_container_client = blob_service_client.get_container_client(TRANSFOR
 
 CONTROLNO_START = 1000
 
+################################################################################################
+### Comment this out for testing and reseeding back to 1000
+# Optional wrapper to dynamically fetch next controlno from SQL
+def get_next_controlno_from_sql():
+    conn = pyodbc.connect(
+        f"DRIVER={os.getenv('SQL_DRIVER')};"
+        f"SERVER={os.getenv('SQL_SERVER')};"
+        f"DATABASE={os.getenv('SQL_DATABASE')};"
+        f"UID={os.getenv('SQL_USERNAME')};"
+        f"PWD={os.getenv('SQL_PASSWORD')}"
+    )
+    cursor = conn.cursor()
+    cursor.execute("SELECT ISNULL(MAX(ControlNo), 999) + 1 FROM control_master")
+    result = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+    return result
+
+################################################################################################
+
 # Wrapper 1: Adds controlno and clientid as the first two columns in the DataFrame
 def add_controlno_and_clientid(df, controlno, clientid):
     df.insert(0, 'controlno', controlno)
@@ -100,7 +120,7 @@ def process_file(sftp, client_name, file_name, controlno):
     sftp.getfo(remote_path, file_data)
     file_data.seek(0)
 
-#### changed this line from df = pd.read_csv(file_data) to below to handle both excel .csv formats and numbers app formats in mac. 
+    #### changed this line from df = pd.read_csv(file_data) to below to handle both excel .csv formats and numbers app formats in mac. 
     df = pd.read_csv(file_data, encoding='ISO-8859-1')
     ##df = pd.read_csv(file_data)  ### This is the old one that didnt read utf-8 data. 
     df = add_controlno_and_clientid(df, controlno, CLIENTS[client_name]['id'])
@@ -155,7 +175,8 @@ def handle_client(client_name, controlno):
 
 # Wrapper 6: Main entry point that iterates through all clients and processes their files
 def main():
-    controlno = CONTROLNO_START
+    ##controlno = CONTROLNO_START  # Uncomment for manual reseed-based testing
+    controlno = get_next_controlno_from_sql()  # Uncomment for dynamic controlno from SQL
     for client_name in CLIENTS:
         controlno = handle_client(client_name, controlno)
     print("\n✅ All client files processed.")
