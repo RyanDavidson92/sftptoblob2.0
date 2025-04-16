@@ -173,13 +173,57 @@ def handle_client(client_name, controlno):
 
     return controlno
 
+
+
+
+
 # Wrapper 6: Main entry point that iterates through all clients and processes their files
+
+def wake_up_sql():
+    try:
+        print("🔌 Warming up SQL Server...")
+        conn = pyodbc.connect(
+            f"DRIVER={os.getenv('SQL_DRIVER')};"
+            f"SERVER={os.getenv('SQL_SERVER')};"
+            f"DATABASE={os.getenv('SQL_DATABASE')};"
+            f"UID={os.getenv('SQL_USERNAME')};"
+            f"PWD={os.getenv('SQL_PASSWORD')}"
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT GETDATE();")
+        cursor.fetchone()
+        conn.close()
+        print("✅ SQL Server is awake. Proceeding...")
+    except Exception as e:
+        print(f"⚠️ Wake-up query failed: {e}")
+        print("⏳ Waiting 30 seconds before retrying...")
+        time.sleep(30)
+
+        # Try once more
+        conn = pyodbc.connect(
+            f"DRIVER={os.getenv('SQL_DRIVER')};"
+            f"SERVER={os.getenv('SQL_SERVER')};"
+            f"DATABASE={os.getenv('SQL_DATABASE')};"
+            f"UID={os.getenv('SQL_USERNAME')};"
+            f"PWD={os.getenv('SQL_PASSWORD')}"
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT GETDATE();")
+        cursor.fetchone()
+        conn.close()
+        print("✅ SQL Server is now responsive.")
+
+
 def main():
-    ##controlno = CONTROLNO_START  # Uncomment for manual reseed-based testing
-    controlno = get_next_controlno_from_sql()  # Uncomment for dynamic controlno from SQL
+    wake_up_sql()  # 👈 Call this *before* querying controlno
+    # controlno = CONTROLNO_START  # Uncomment for manual reseed-based testing
+    controlno = get_next_controlno_from_sql()  # Dynamic controlno start point
+
     for client_name in CLIENTS:
         controlno = handle_client(client_name, controlno)
+
     print("\n✅ All client files processed.")
+
 
 if __name__ == "__main__":
     main()
