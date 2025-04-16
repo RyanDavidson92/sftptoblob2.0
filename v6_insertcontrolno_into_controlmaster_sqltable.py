@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 from datetime import datetime
 import pytz
+import time 
+
 
 # Load environment variables
 load_dotenv()
