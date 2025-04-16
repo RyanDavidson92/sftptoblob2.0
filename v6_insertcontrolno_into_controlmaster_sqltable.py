@@ -143,7 +143,12 @@ def process_file(sftp, client_name, file_name, controlno):
     df.to_csv(output_buffer, index=False)
     output_buffer.seek(0)
 
-    transformed_name = f"{client_name.lower()}_transformed_{file_name}"
+
+    ## old transformed name that overwrote previous files, new one is needed to allow adding incremental files. 
+    ##transformed_name = f"{client_name.lower()}_transformed_{file_name}"
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    transformed_name = f"{client_name.lower()}_transformed_{timestamp}_{file_name}"
+
     upload_to_blob(output_buffer, transformed_name, is_transformed=True)
 
     file_data.seek(0)
