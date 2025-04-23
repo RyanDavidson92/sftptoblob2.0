@@ -213,8 +213,8 @@ def main():
     wake_up_sql()
     controlno = get_next_controlno_from_sql()
     for client_name in CLIENTS:
-        ##controlno = handle_client(client_name, controlno)  ## This is for all clients and carriers, keep line 203 in for single client testing. 
-        controlno = handle_client("clientC", controlno)
+        controlno = handle_client(client_name, controlno)  ## This is for all clients and carriers, keep line 203 in for single client testing. 
+        ##controlno = handle_client("clientC", controlno)
     print("\n✅ All client files processed.")
 
 if __name__ == "__main__":
