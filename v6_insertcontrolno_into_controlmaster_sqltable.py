@@ -24,8 +24,9 @@ TRANSFORMED_CONTAINER = os.getenv("AZURE_TRANSFORMED_CONTAINER")
 
 # Client config
 CLIENTS = {
-    "clientA": {"user": os.getenv("SFTP_CLIENTA_USER"), "pass": os.getenv("SFTP_CLIENTA_PASS"), "id": 12659},
-    "clientB": {"user": os.getenv("SFTP_CLIENTB_USER"), "pass": os.getenv("SFTP_CLIENTB_PASS"), "id": 12660},
+    "clientA": {"user": os.getenv("SFTP_CLIENTA_USER"), "pass": os.getenv("SFTP_CLIENTA_PASS"), "id": 12659},  ###USPS Client
+    "clientB": {"user": os.getenv("SFTP_CLIENTB_USER"), "pass": os.getenv("SFTP_CLIENTB_PASS"), "id": 12660},  ###USPS Client
+    "clientC": {"user": os.getenv("SFTP_CLIENTC_USER"), "pass": os.getenv("SFTP_CLIENTB_PASS"), "id": 12661}   ###UPS Client
 }
 
 # Initialize Azure Blob client
@@ -55,6 +56,16 @@ def add_controlno_and_clientid(df, controlno, clientid):
     df.insert(1, 'clientid', clientid)
     return df
 
+# Add carrier based on clientid
+def assign_carrier(df):
+    df["carrier"] = df["clientid"].map({
+        12659: "USPS",      # Client A – USPS
+        12660: "USPS",      # Client B – USPS
+        12661: "UPS",      # Client C – UPS only
+    })
+    return df
+
+
 def upload_to_blob(file_data, blob_name, is_transformed=False):
     blob_client = (transformed_container_client if is_transformed else raw_container_client).get_blob_client(blob_name)
     if not blob_client.exists():
@@ -63,7 +74,7 @@ def upload_to_blob(file_data, blob_name, is_transformed=False):
     else:
         print(f"⚠️ Skipped duplicate blob: {blob_name}")
 
-def insert_into_control_master(clientid, filename, recordcount, file_bytes):
+def insert_into_control_master(clientid, filename, recordcount, file_bytes, carrier):
     try:
         file_hash = hashlib.sha256(file_bytes).hexdigest()
         est = pytz.timezone('US/Eastern')
@@ -85,15 +96,16 @@ def insert_into_control_master(clientid, filename, recordcount, file_bytes):
             return
 
         cursor.execute("""
-            INSERT INTO control_master (ClientID, FileName, RecordCount, LoadTimestamp, SourceSystem, FileHash)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO control_master (ClientID, FileName, RecordCount, LoadTimestamp, SourceSystem, FileHash, carrier)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             clientid,
             filename,
             recordcount,
             load_timestamp,
             "pipeline transfer",
-            file_hash
+            file_hash,
+            carrier
         ))
 
         cursor.execute("SELECT SCOPE_IDENTITY();")
@@ -115,15 +127,18 @@ def process_file(sftp, client_name, file_name, controlno):
 
     df = pd.read_csv(file_data, encoding='ISO-8859-1')
     df = add_controlno_and_clientid(df, controlno, CLIENTS[client_name]['id'])
+    df = assign_carrier(df)  ### Add carrier based on clientid
+
 
     recordcount = len(df)
     file_data.seek(0)
     insert_into_control_master(
-        clientid=CLIENTS[client_name]['id'],
-        filename=file_name,
-        recordcount=recordcount,
-        file_bytes=file_data.read()
-    )
+    clientid=CLIENTS[client_name]['id'],
+    filename=file_name,
+    recordcount=recordcount,
+    file_bytes=file_data.read(),
+    carrier=df["carrier"].iloc[0]   ### New param added
+)
 
     file_data.seek(0)
     output_buffer = BytesIO()
@@ -198,7 +213,8 @@ def main():
     wake_up_sql()
     controlno = get_next_controlno_from_sql()
     for client_name in CLIENTS:
-        controlno = handle_client(client_name, controlno)
+        ##controlno = handle_client(client_name, controlno)  ## This is for all clients and carriers, keep line 203 in for single client testing. 
+        controlno = handle_client("clientC", controlno)
     print("\n✅ All client files processed.")
 
 if __name__ == "__main__":
