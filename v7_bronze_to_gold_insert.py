@@ -18,7 +18,9 @@ SQL_USERNAME = os.getenv("SQL_USERNAME")
 SQL_PASSWORD = os.getenv("SQL_PASSWORD")
 SQL_DRIVER = os.getenv("SQL_DRIVER", "ODBC Driver 17 for SQL Server")
 
-TABLE_NAME = "TestDB.dbo.usps_ebill_prod"
+# TABLE NAMES
+USPS_TABLE = "TestDB.dbo.usps_ebill_prod"
+UPS_TABLE = "TestDB.dbo.ups_ebill_prod"
 
 # CONNECT TO BLOB SERVICE
 blob_service_client = BlobServiceClient(
@@ -39,21 +41,8 @@ conn = pyodbc.connect(conn_str)
 cursor = conn.cursor()
 cursor.fast_executemany = True
 
-# Insert SQL (29 fields, omit ID and CreatedDate)
-insert_sql = f"""
-INSERT INTO {TABLE_NAME} (
-    ControlNo, ChildID, TrackingNumber, InvoiceNumber, InvoiceDate, ShipDate,
-    Length, Height, Width, DimUOM, ServiceLevel, ShipperNumber,
-    OriginZip, DestinationZip, Zone, BilledWeight_LB, WeightUnit,
-    PackageCharge, FuelSurcharge, ResidentialSurcharge, DASCharge, TotalCharge,
-    AccessorialCode, AccessorialDescription, PackageStatus, ReceiverName,
-    ReceiverCity, ReceiverState, ReceiverCountry
-)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-"""
-
-# Expected columns (lowercase)
-expected_cols = [
+# USPS expected columns (lowercase)
+usps_cols = [
     "controlno", "childid", "trackingnumber", "invoicenumber", "invoicedate", "shipdate",
     "length", "height", "width", "dimuom", "servicelevel", "shippernumber",
     "originzip", "destinationzip", "zone", "billedweight_lb", "weightunit",
@@ -62,49 +51,92 @@ expected_cols = [
     "receivercity", "receiverstate", "receivercountry"
 ]
 
-# PROCESS EACH FILE
-for blob in container_client.list_blobs():
-    if not blob.name.endswith(".csv"):
-        continue
+# UPS expected columns (match ups_ebill_prod)
+ups_cols = [
+    "Lead Shipment Number", "ControlNo", "ChildID", "BillToAccountNo", "InvoiceDt", "Bill Option Code",
+    "Container Type", "Transaction Date", "Package Quantity", "Sender Country", "Receiver Country",
+    "Charge Category Code", "Charge Classification Code", "Charge Category Detail Code",
+    "Charge Description", "Zone", "Billed Weight", "Billed Weight Unit of Measure",
+    "Billed Weight Type", "Net Amount", "Incentive Amount", "Tracking Number",
+    "Sender State", "Receiver State", "Invoice Currency Code"
+]
 
-    print(f"📥 Processing file: {blob.name}")
+# USPS insert SQL
+insert_usps_sql = f"""
+    INSERT INTO {USPS_TABLE} (
+        ControlNo, ChildID, TrackingNumber, InvoiceNumber, InvoiceDate, ShipDate,
+        Length, Height, Width, DimUOM, ServiceLevel, ShipperNumber,
+        OriginZip, DestinationZip, Zone, BilledWeight_LB, WeightUnit,
+        PackageCharge, FuelSurcharge, ResidentialSurcharge, DASCharge, TotalCharge,
+        AccessorialCode, AccessorialDescription, PackageStatus, ReceiverName,
+        ReceiverCity, ReceiverState, ReceiverCountry
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+# UPS insert SQL
+insert_ups_sql = f"""
+    INSERT INTO {UPS_TABLE} (
+        [Lead Shipment Number], ControlNo, ChildID, BillToAccountNo, InvoiceDt, [Bill Option Code],
+        [Container Type], [Transaction Date], [Package Quantity], [Sender Country], [Receiver Country],
+        [Charge Category Code], [Charge Classification Code], [Charge Category Detail Code],
+        [Charge Description], Zone, [Billed Weight], [Billed Weight Unit of Measure],
+        [Billed Weight Type], [Net Amount], [Incentive Amount], [Tracking Number],
+        [Sender State], [Receiver State], [Invoice Currency Code]
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+def process_usps_blob(df, blob_name):
+    df.columns = df.columns.str.lower()
+    df = df.drop(columns=["createddate"], errors="ignore")
+
+    if not all(col in df.columns for col in usps_cols):
+        missing = [col for col in usps_cols if col not in df.columns]
+        raise ValueError(f"Missing USPS columns: {missing}")
+
+    df = df[usps_cols]
+    cursor.executemany(insert_usps_sql, df.values.tolist())
+    conn.commit()
+    print(f"✅ Inserted {len(df)} rows into usps_ebill_prod from {blob_name}")
+
+def process_ups_blob(df, blob_name):
+    if not all(col in df.columns for col in ups_cols):
+        missing = [col for col in ups_cols if col not in df.columns]
+        raise ValueError(f"Missing UPS columns: {missing}")
+
+    df = df[ups_cols]
+    cursor.executemany(insert_ups_sql, df.values.tolist())
+    conn.commit()
+    print(f"✅ Inserted {len(df)} rows into ups_ebill_prod from {blob_name}")
+
+def process_transformed_blob(blob):
+    if not blob.name.endswith(".csv"):
+        return
+
+    print(f"\n📥 Processing file: {blob.name}")
     blob_client = container_client.get_blob_client(blob.name)
 
     try:
-        # ✅ MISSING BLOCK - insert this to fix the error
         blob_data = blob_client.download_blob().readall()
         df = pd.read_csv(BytesIO(blob_data))
 
-        # Normalize column names
-        df.columns = df.columns.str.strip().str.lower()
-        df = df.rename(columns={"clientid": "childid"})
-        df = df.drop(columns=["createddate"], errors="ignore")
+        df.columns = df.columns.str.strip()
+        df = df.rename(columns={"clientid": "ChildID", "controlno": "ControlNo"})
+        carrier = df.get("carrier", [None])[0]
 
-        # Check for missing columns
-        if not all(col in df.columns for col in expected_cols):
-            missing = [col for col in expected_cols if col not in df.columns]
-            raise ValueError(f"Missing columns: {missing}")
-
-        # Reorder columns
-        df = df[expected_cols]
-
-        # ✅ Wrap the insert logic
-        try:
-            cursor.executemany(insert_sql, df.values.tolist())
-            conn.commit()
-            print(f"✅ Inserted {len(df)} rows from {blob.name}")
-
-        except pyodbc.IntegrityError as e:
-            if "UQ_Tracking_Control" in str(e):
-                print(f"⚠️  Skipped {blob.name}: duplicate TrackingNumber + ControlNo already in table.")
-            else:
-                print(f"❌ IntegrityError in {blob.name}: {e}")
+        if carrier == "USPS":
+            process_usps_blob(df, blob.name)
+        elif carrier == "UPS":
+            process_ups_blob(df, blob.name)
+        else:
+            print(f"⚠️ Skipped {blob.name}: unknown carrier type '{carrier}'")
 
     except Exception as e:
-        print(f"❌ Unexpected error in {blob.name}: {e}")
+        print(f"❌ Error processing {blob.name}: {e}")
 
-
+# MAIN EXECUTION
+for blob in container_client.list_blobs():
+    process_transformed_blob(blob)
 
 cursor.close()
 conn.close()
-print("🏁 All files processed.")
+print("\n🏁 All files processed.")
