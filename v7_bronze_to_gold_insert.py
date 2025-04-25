@@ -21,6 +21,7 @@ SQL_DRIVER = os.getenv("SQL_DRIVER", "ODBC Driver 17 for SQL Server")
 # TABLE NAMES
 USPS_TABLE = "TestDB.dbo.usps_ebill_prod"
 UPS_TABLE = "TestDB.dbo.ups_ebill_prod"
+Control_master = "TestDB.dbo.Control_master"
 
 # CONNECT TO BLOB SERVICE
 blob_service_client = BlobServiceClient(
@@ -112,6 +113,12 @@ def process_transformed_blob(blob):
     if not blob.name.endswith(".csv"):
         return
 
+    # Check if already processed
+    cursor.execute(f"SELECT 1 FROM {Control_master} WHERE FileName = ?", (blob.name,))
+    if cursor.fetchone():
+        print(f"⚠️ Skipped {blob.name}: already processed.")
+        return
+
     print(f"\n📥 Processing file: {blob.name}")
     blob_client = container_client.get_blob_client(blob.name)
 
@@ -129,6 +136,14 @@ def process_transformed_blob(blob):
             process_ups_blob(df, blob.name)
         else:
             print(f"⚠️ Skipped {blob.name}: unknown carrier type '{carrier}'")
+            return
+
+        # Mark as processed
+        cursor.execute(
+            f"INSERT INTO {Control_master} (FileName) VALUES (?)",
+            (blob.name,)
+        )
+        conn.commit()
 
     except Exception as e:
         print(f"❌ Error processing {blob.name}: {e}")
