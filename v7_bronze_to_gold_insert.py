@@ -1,3 +1,5 @@
+
+
 import os
 import pandas as pd
 import pyodbc
@@ -138,15 +140,21 @@ def process_transformed_blob(blob):
             print(f"⚠️ Skipped {blob.name}: unknown carrier type '{carrier}'")
             return
 
-        # Mark as processed
-        cursor.execute(
-            f"INSERT INTO {Control_master} (FileName) VALUES (?)",
-            (blob.name,)
-        )
-        conn.commit()
+
+    except pyodbc.IntegrityError as e:
+        error_msg = str(e)
+        if "duplicate" in error_msg.lower() or "unique" in error_msg.lower():
+            print(f"⚠️ Skipped {blob.name}: Duplicate record.")
+        else:
+            print(f"❌ Integrity error in {blob.name}: {error_msg.splitlines()[0]}")
 
     except Exception as e:
-        print(f"❌ Error processing {blob.name}: {e}")
+        print(f"❌ General error in {blob.name}: {str(e).splitlines()[0]}")
+
+
+
+
+
 
 # MAIN EXECUTION
 for blob in container_client.list_blobs():
