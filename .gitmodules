@@ -1,0 +1,3 @@
+[submodule "private_gpt"]
+	path = private_gpt
+	url = https://github.com/RyanDavidson92/gpt-audit-engine
