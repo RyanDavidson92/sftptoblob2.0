@@ -152,10 +152,6 @@ def process_transformed_blob(blob):
         print(f"❌ General error in {blob.name}: {str(e).splitlines()[0]}")
 
 
-
-
-
-
 # MAIN EXECUTION
 for blob in container_client.list_blobs():
     process_transformed_blob(blob)
