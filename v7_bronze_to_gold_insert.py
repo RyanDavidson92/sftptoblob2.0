@@ -158,4 +158,4 @@ for blob in container_client.list_blobs():
 
 cursor.close()
 conn.close()
-print("\n🏁 All files processed.")
+print("\n🏁 All files have been processed.")
